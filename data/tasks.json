@@ -27,8 +27,8 @@
   ],
   "user_config": {
     "engineer_mode": false,
-    "auto_start": true,
-    "test_mode": true,
+    "auto_start": false,
+    "test_mode": false,
     "deepseek_enabled": false
   },
   "meta": {
