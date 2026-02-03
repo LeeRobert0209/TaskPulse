@@ -19,9 +19,13 @@ class SystemTray(QSystemTrayIcon):
         self.menu = QMenu()
         
         # Actions
-        show_action = QAction("显示 TaskPulse", self)
+        show_action = QAction("显示主界面", self)
         show_action.triggered.connect(self.on_show_clicked)
         self.menu.addAction(show_action)
+        
+        self.mini_mode_action = QAction("进入精简模式", self)
+        self.mini_mode_action.triggered.connect(self.on_mini_mode_clicked)
+        self.menu.addAction(self.mini_mode_action)
         
         # Quick Focus Submenu was removed per user request
         
@@ -56,7 +60,25 @@ class SystemTray(QSystemTrayIcon):
             self.on_show_clicked()
 
     def on_show_clicked(self):
+        # We need to distinguish mode? 
+        # Actually calling show_normal_thread_safe is fine, but if in mini mode we should probably restore?
+        # User might just want to bring to front.
+        # But if we are in Mini Mode, show_normal might not be enough if flags are weird?
+        # Let's delegate to MainWindow logic if possible.
+        # But for now, simple show is okay.
         self.main_window.show_normal_thread_safe()
+
+    def on_mini_mode_clicked(self):
+        # Trigger toggle if not already in mini mode
+        # We need to access main_window state.
+        # Ideally add a method to Main Window to force set mode logic.
+        # But toggle is available.
+        if not getattr(self.main_window, 'is_mini_mode', False):
+             self.main_window.toggle_mini_mode()
+        else:
+             # Already in mini mode, just show
+             self.main_window.show()
+             self.main_window.activateWindow()
 
     def on_quick_timer(self, minutes):
         import uuid

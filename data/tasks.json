@@ -23,11 +23,19 @@
       "params": {},
       "created_at": "2025-12-31T09:57:23.124040",
       "status": "active"
+    },
+    {
+      "id": "61117aee-b220-4414-8f2b-222579b1d71c",
+      "title": "复盘",
+      "type": "manual",
+      "params": {},
+      "created_at": "2026-02-03T09:33:12.835400",
+      "status": "active"
     }
   ],
   "user_config": {
     "engineer_mode": false,
-    "auto_start": false,
+    "auto_start": true,
     "test_mode": false,
     "deepseek_enabled": false
   },

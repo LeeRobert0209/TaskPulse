@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QLabel, 
                                QLineEdit, QApplication, QSystemTrayIcon, QMenu,
                                QTabWidget, QCheckBox, QPushButton, QListWidget, QHBoxLayout,
-                               QSlider, QGroupBox, QGridLayout, QScrollArea, QComboBox, QFrame, QSizePolicy, QCompleter, QMessageBox)
+                               QSlider, QGroupBox, QGridLayout, QScrollArea, QComboBox, 
+                               QFrame, QSizePolicy, QCompleter, QMessageBox, QStackedWidget)
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QTime, QRect, QSize, QPoint, QStringListModel, QEvent
 from PySide6.QtGui import QIcon, QAction, QPainter, QColor, QBrush, QPen, QFont, QPainterPath
 from datetime import datetime, timedelta
@@ -484,6 +485,162 @@ class TaskItemWidget(QWidget):
             else:
                  self.status_label.setStyleSheet("color: #007bff; font-weight: bold;")
 
+class MiniModeWidget(QWidget):
+    """
+    Compact 'Music Player' style widget for focused work.
+    Shows only Task Name, Timer, Restore, and Close.
+    Support dragging since window is frameless.
+    """
+    restore_clicked = Signal()
+    close_clicked = Signal()
+    add_task_clicked = Signal(str) # Emits task name
+
+    
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Floating effect needs a bit of margin for shadow if we were using graphics effect, 
+        # but for simple widget styling we do border and radius.
+        # Floating effect with specific selector to avoid leaking style to children
+        self.setStyleSheet("""
+            QWidget#MiniModeWidget {
+                background-color: #222222; 
+                border: 1px solid #555555; 
+                border-radius: 0px; 
+            }
+        """)
+        self.setObjectName("MiniModeWidget")
+        self.setAttribute(Qt.WA_StyledBackground, True) # Ensure background draws
+        
+        # Ultra-Compact 300x30
+        self.setFixedSize(300, 30)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0) 
+        layout.setSpacing(5)
+        
+        # Drag handle logic
+        self._drag_pos = None
+
+        # controls layout
+        
+        # Task Label
+        self.task_label = QLabel("无任务")
+        self.task_label.setStyleSheet("color: #888; font-size: 10px; border: none; background: transparent;")
+        self.task_label.setFixedWidth(70) 
+        
+        # Time Label
+        self.time_label = QLabel("00:00")
+        self.time_label.setAlignment(Qt.AlignCenter)
+        
+        # Controls
+        # Controls
+        # Restore Button
+        self.btn_restore = QPushButton("❐") # Square icon for restore
+        self.btn_restore.setFixedSize(20, 20)
+        self.btn_restore.setCursor(Qt.PointingHandCursor)
+        self.btn_restore.setToolTip("恢复标准模式")
+        self.btn_restore.clicked.connect(self.restore_clicked.emit)
+        self.btn_restore.setStyleSheet("""
+            QPushButton {
+                background-color: #444; 
+                border: none; 
+                border-radius: 10px; 
+                color: #eee; 
+                font-size: 10px;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #666; }
+        """)
+
+        # Add Task Button
+        self.btn_add = QPushButton("+")
+        self.btn_add.setFixedSize(20, 20)
+        self.btn_add.setCursor(Qt.PointingHandCursor)
+        self.btn_add.setToolTip("快速添加任务")
+        self.btn_add.clicked.connect(self.on_add_clicked)
+        self.btn_add.setStyleSheet("""
+            QPushButton {
+                background-color: #007aff; 
+                border: none; 
+                border-radius: 10px; 
+                color: white; 
+                font-size: 14px; 
+                font-weight: bold;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #0056b3; }
+        """)
+
+        # Close Button
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setFixedSize(20, 20)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.setToolTip("隐藏到托盘")
+        self.btn_close.clicked.connect(self.close_clicked.emit)
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; 
+                border: none; 
+                border-radius: 10px; 
+                color: #888; 
+                font-size: 10px;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #cc0000; color: white; }
+        """)
+
+        layout.addWidget(self.task_label)
+        layout.addWidget(self.time_label, 1) # Stretch time
+        layout.addWidget(self.btn_add)
+        layout.addWidget(self.btn_restore)
+        layout.addWidget(self.btn_close)
+        
+    def on_add_clicked(self):
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+        text, ok = QInputDialog.getText(self, "添加任务", "任务名称:", QLineEdit.Normal, "")
+        if ok and text.strip():
+            self.add_task_clicked.emit(text.strip())
+        
+    def update_info(self, task_name, time_str, is_break=False):
+        # Truncate task name
+        metrics = self.task_label.fontMetrics()
+        elided = metrics.elidedText(task_name, Qt.ElideRight, self.task_label.width())
+        self.task_label.setText(elided)
+        self.time_label.setText(time_str)
+        
+        if is_break:
+             # Green digital glow
+             self.time_label.setStyleSheet("""
+                font-family: Consolas, monospace; 
+                font-size: 20px; 
+                color: #4cd964; 
+                font-weight: bold; 
+                border: none; 
+                background: transparent;
+             """)
+        else:
+             # Blue digital glow
+             self.time_label.setStyleSheet("""
+                font-family: Consolas, monospace; 
+                font-size: 20px; 
+                color: #007aff; 
+                font-weight: bold; 
+                border: none; 
+                background: transparent;
+             """)
+
+    # Dragging logic
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.window().frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and self._drag_pos:
+            self.window().move(event.globalPos() - self._drag_pos)
+            event.accept()
+
 class MainWindow(QMainWindow):
     # Custom signals
     request_show = Signal()
@@ -494,19 +651,36 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         if APP_ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
-        self.resize(380, 500)
+        self.resize(400, 600) # User mentioned 400x600 as standard
         self.data_manager = DataManager()
         self.scheduler = scheduler
         self.pomodoro_count = 0 # Track completed Pomodoros
         
+        self.is_mini_mode = False
+        self.normal_geometry = None
+        
         # Setup UI
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        # Setup UI - Use StackedWidget for Mode Switching
+        self.stack = QStackedWidget()
+        self.setCentralWidget(self.stack)
+        
+        # --- Page 1: Normal Mode ---
+        self.central_widget_normal = QWidget()
+        self.main_layout = QVBoxLayout(self.central_widget_normal)
+        main_layout = self.main_layout
         
         # Tabs
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
+        
+        self.stack.addWidget(self.central_widget_normal)
+        
+        # --- Page 2: Mini Mode (Lazy Init or Pre-init) ---
+        self.mini_widget = MiniModeWidget(self)
+        self.mini_widget.restore_clicked.connect(self.toggle_mini_mode)
+        self.mini_widget.close_clicked.connect(self.close)
+        self.mini_widget.add_task_clicked.connect(self.quick_add_task)
+        self.stack.addWidget(self.mini_widget)
         
         # Tab 1: Dashboard (Tasks & Input)
         self.dashboard_tab = QWidget()
@@ -532,8 +706,22 @@ class MainWindow(QMainWindow):
     def setup_dashboard(self, parent):
         layout = QVBoxLayout(parent)
         
-    def setup_dashboard(self, parent):
-        layout = QVBoxLayout(parent)
+        # Header Row with Mini Mode Button
+        header_layout = QHBoxLayout()
+        header_layout.addStretch()
+        
+        self.btn_mini_mode = QPushButton("精简模式")
+        self.btn_mini_mode.setToolTip("切换到桌面迷你倒计时")
+        self.btn_mini_mode.setStyleSheet("""
+            QPushButton {
+                color: #666; background: transparent; border: 1px solid #ccc; border-radius: 4px; padding: 2px 8px; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #f0f0f0; color: #333; }
+        """)
+        self.btn_mini_mode.clicked.connect(self.toggle_mini_mode)
+        header_layout.addWidget(self.btn_mini_mode)
+        
+        layout.addLayout(header_layout)
         
         # 0. Encouragement Label (Added per user request)
         quote_text = "种一棵树最好的时间是十年前，其次是现在。\n保持专注，当下即是未来。" # Fallback
@@ -1012,7 +1200,108 @@ class MainWindow(QMainWindow):
                 msg.setStandardButtons(QMessageBox.Ok)
                 msg.exec()
 
+                msg.setStandardButtons(QMessageBox.Ok)
+                msg.exec()
+
+    def toggle_mini_mode(self):
+        """Switch between Normal and Mini Mode."""
+        if not self.is_mini_mode:
+            # === Switch to Mini Mode ===
+            self.is_mini_mode = True
+            self.normal_geometry = self.geometry()
+            
+            # Hide first
+            self.hide()
+            
+            # Change flags: Frameless + StayOnTop
+            # Removed Qt.Tool as it can cause restoration issues on some Windows versions
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            
+            # Setup Mini Widget if not already in stack (it is now pre-inited, but just in case logic changed)
+            if self.stack.indexOf(self.mini_widget) == -1:
+                 self.stack.addWidget(self.mini_widget)
+            
+            # Switch Stack
+            self.stack.setCurrentWidget(self.mini_widget)
+            
+            # FORCE Resize and constraints
+            # setFixedSize on MainWindow is the only sure way to stop layout expansion
+            self.setFixedSize(300, 30)
+            self.show()
+            
+        else:
+            # === Restore to Normal Mode ===
+            self.is_mini_mode = False
+            
+            self.hide()
+            
+            # 1. Restore Flags
+            self.setWindowFlags(Qt.Window)
+            
+            # 2. Swap Content
+            self.stack.setCurrentWidget(self.central_widget_normal)
+            
+            # 3. Reset Constraints
+            self.setMinimumSize(0, 0) 
+            self.setMaximumSize(16777215, 16777215) # QWIDGETSIZE_MAX
+            
+            # 4. Restore Geometry
+            if self.normal_geometry:
+                self.setGeometry(self.normal_geometry)
+            else:
+                self.resize(400, 600)
+                # Center on screen fallback
+                try:
+                    screen_geo = self.screen().availableGeometry()
+                    if screen_geo.isValid():
+                        center_point = screen_geo.center()
+                        self.move(center_point.x() - 200, center_point.y() - 300)
+                except:
+                    pass
+            
+            # 5. Show and Activate
+            # Using showNormal() ensuring it's not minimized
+            self.showNormal()
+            self.activateWindow()
+            self.raise_()
+            
+        self.refresh_task_list(full_reload=False) # Update timers immediately
+
     def refresh_task_list(self, full_reload=False):
+        # Update Mini Widget if active
+        if self.is_mini_mode and hasattr(self, 'mini_widget'):
+            # Find most urgent active task
+            active_task = None
+            min_remaining = float('inf')
+            
+            from datetime import datetime
+            now = datetime.now()
+            
+            for t_id, info in self.active_ui_tasks.items():
+                if not info["finished"]:
+                    rem = (info["end_time"] - now).total_seconds()
+                    if rem < min_remaining:
+                        min_remaining = rem
+                        active_task = info
+            
+            if active_task:
+                 title = active_task['title']
+                 rem_sec = int(min_remaining) if min_remaining > 0 else 0
+                 mins, secs = divmod(rem_sec, 60)
+                 if mins >= 60:
+                     hrs, mins = divmod(mins, 60)
+                     time_str = f"{hrs}:{mins:02d}:{secs:02d}"
+                 else:
+                     time_str = f"{mins:02d}:{secs:02d}"
+                 
+                 is_break = active_task.get("type") == "break"
+                 self.mini_widget.update_info(title, time_str, is_break)
+            else:
+                 self.mini_widget.update_info("暂无任务", "00:00")
+            
+            # We skip table update if in mini mode to save resources? 
+            # Or just let it run in background. It's fine to run; table is hidden.
+        
         if full_reload:
              self.task_list.setRowCount(0) # Clear table
         
@@ -1255,13 +1544,23 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         self.raise_()
 
-    def handle_input(self):
-        text = self.input_field.text().strip()
-        if text:
-            # Add as task logic (Simplified)
-            # In real deep mode, would parse date/time or show dialog
-            self.data_manager.add_task(text, "manual")
-            self.task_list.addItem(text)
+    def quick_add_task(self, task_name):
+        """Handle quick add from Mini Mode."""
+        # 1. Add to active UI tasks immediately
+    def quick_add_task(self, task_name):
+        """Handle quick add from Mini Mode."""
+        if not task_name: return
+        
+        self.input_field.setText(task_name) 
+        # User expects task to START immediately when using this quick add.
+        # Default to 25m Pomodoro
+        self.start_focus_with_input(25, is_pomodoro=True)
+    
+    def add_task(self):
+        task_name = self.input_field.text().strip()
+        if task_name:
+            self.data_manager.add_task(task_name, "manual") 
+            # Note: This just adds to Todo list, doesn't start timer.
                 
         self.input_field.clear()
 

@@ -24,7 +24,7 @@ def show_notification(title, message):
 def set_autostart(enable: bool = True):
     """
     Toggle auto-start for the application in Windows Registry.
-    Stores the command to run the current script with python.
+    Uses Start_TaskPulse.bat to ensure correct environment.
     """
     key = winreg.HKEY_CURRENT_USER
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -32,19 +32,20 @@ def set_autostart(enable: bool = True):
     try:
         registry_key = winreg.OpenKey(key, key_path, 0, winreg.KEY_WRITE)
         if enable:
-            # Get current python executable and script path
-            python_exe = sys.executable
-            # Assuming the entry point is the main script running this
-            # Ideally obtaining the absolute path to src/main.py
-            # If running from IDE, sys.argv[0] is the script path
-            script_path = os.path.abspath(sys.argv[0]) 
+            # Use the batch file in the project root as it handles environment setup correctly
+            from .config import PROJECT_ROOT
+            bat_path = PROJECT_ROOT / "Start_TaskPulse.bat"
             
-            # Construct command
-            # TODO: Add argument for minimized start if needed, e.g. --minimized
-            command = f'"{python_exe}" "{script_path}"'
-            
-            winreg.SetValueEx(registry_key, APP_NAME, 0, winreg.REG_SZ, command)
-            logging.info(f"Auto-start enabled: {command}")
+            if bat_path.exists():
+                command = f'"{bat_path}"'
+                winreg.SetValueEx(registry_key, APP_NAME, 0, winreg.REG_SZ, command)
+                logging.info(f"Auto-start enabled: {command}")
+            else:
+                logging.error(f"Batch file not found at {bat_path}, cannot enable autostart.")
+                # Fallback to previous method or fail?
+                # Failing is better than broken entry.
+                winreg.CloseKey(registry_key)
+                return False
         else:
             try:
                 winreg.DeleteValue(registry_key, APP_NAME)
