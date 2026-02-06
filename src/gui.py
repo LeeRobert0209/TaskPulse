@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from .config import APP_NAME, APP_ICON_PATH
 from .data_manager import DataManager
 from .utils import set_autostart
+from PySide6.QtWidgets import QDialog
 
 
 
@@ -641,6 +642,77 @@ class MiniModeWidget(QWidget):
             self.window().move(event.globalPos() - self._drag_pos)
             event.accept()
 
+
+class RestCompletionDialog(QDialog):
+    def __init__(self, parent=None, history_items=[]):
+        super().__init__(parent)
+        self.setWindowTitle("休息结束") 
+        
+        # Make it stay on top so user sees it
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # More compact size (user preference)
+        self.setFixedSize(210, 125)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 5, 6, 6)
+        layout.setSpacing(4)
+        
+        label = QLabel("休息结束，开始下一轮吗？")
+        label.setWordWrap(True)
+        label.setStyleSheet("font-size: 11px; font-weight: 600; margin: 0px; padding: 0px; line-height: 1.05;")
+        layout.addWidget(label)
+        
+        self.combo = QComboBox()
+        self.combo.setEditable(True)
+        self.combo.setPlaceholderText("输入/选择任务名称")
+        self.combo.setFixedHeight(24)
+        self.combo.setStyleSheet("QComboBox { padding: 0px 4px; } QLineEdit { padding: 0px 2px; }")
+        if history_items:
+            self.combo.addItems(history_items)
+            
+        # Select the text in the combo so user can easily overwrite it
+        # Or maybe default to the last used? For now, leave as is or empty if no history.
+        # If there are items, it often defaults to the first.
+        
+        layout.addWidget(self.combo)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        self.btn_postpone = QPushButton("稍后")
+        self.btn_start = QPushButton("开始")
+        self.btn_postpone.setFixedHeight(24)
+        self.btn_start.setFixedHeight(24)
+        self.btn_postpone.setStyleSheet("QPushButton { padding: 2px 10px; font-size: 11px; }")
+        
+        # Style
+        self.btn_start.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745; 
+                color: white; 
+                padding: 2px 10px; 
+                font-weight: bold;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #218838; }
+        """)
+        
+        self.btn_start.clicked.connect(self.accept)
+        self.btn_postpone.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_postpone)
+        btn_layout.addWidget(self.btn_start)
+        
+        layout.addLayout(btn_layout)
+        
+        # Focus the combo
+        self.combo.setFocus()
+
+    def get_task_name(self):
+        return self.combo.currentText().strip()
+
 class MainWindow(QMainWindow):
     # Custom signals
     request_show = Signal()
@@ -871,7 +943,13 @@ class MainWindow(QMainWindow):
             }
             QPushButton:hover { background-color: #e68900; }
         """)
-        self.test_btn.clicked.connect(lambda: self.start_focus_with_input(5/60)) # 5 seconds
+        def on_test_click():
+            if not self.input_field.text().strip():
+                self.input_field.setText("测试任务")
+            self.start_focus_with_input(5/60, is_pomodoro=True)
+            
+        self.test_btn.clicked.connect(on_test_click) # 5 seconds, as Pomodoro
+
         self.test_btn.setVisible(False)
         self.btn_layout.addWidget(self.test_btn)
 
@@ -1115,93 +1193,107 @@ class MainWindow(QMainWindow):
     
     def update_task_timers(self):
         # Called every second
+        if getattr(self, '_updating_timers', False):
+            return
+        self._updating_timers = True
+        
         updated = False
-        popup_needed_for = None # Store task info if popup is needed
+        popup_needed_for = None
         
-        from datetime import datetime
-        from PySide6.QtWidgets import QMessageBox
-        now = datetime.now()
-        
-        # Don't auto remove anymore, just mark finished
-        
-        for t_id, info in self.active_ui_tasks.items():
-            if info["finished"]:
-                continue
+        try:
+            from datetime import datetime
+            from PySide6.QtWidgets import QMessageBox
+            now = datetime.now()
+            
+            for t_id, info in self.active_ui_tasks.items():
+                if info["finished"]:
+                    continue
+                    
+                remaining = (info["end_time"] - now).total_seconds()
                 
-            remaining = (info["end_time"] - now).total_seconds()
-            
-            if remaining <= 0:
-                # Task Just Finished
-                info["finished"] = True
-                info["finished_time"] = now # Record actual finish time
-                updated = True
+                if remaining <= 0:
+                    info["finished"] = True
+                    info["finished_time"] = now
+                    updated = True
+                    
+                    if not info["popup_shown"]:
+                        popup_needed_for = info
+                        info["popup_shown"] = True
+                else:
+                    updated = True
                 
-                # Check if popup is needed
-                if not info["popup_shown"]:
-                    popup_needed_for = info
-                    info["popup_shown"] = True
-            else:
-                updated = True
-            
-        if updated:
-            self.refresh_task_list(full_reload=False)
-            
-            # Force UI update so Green Background appears BEFORE popup blocks execution
-            QApplication.processEvents() 
+            if updated:
+                self.refresh_task_list(full_reload=False)
+                QApplication.processEvents()
+        except Exception as e:
+            print(f"Error in timer update: {e}")
+            self._updating_timers = False
+            return
 
-        # Handle Popup AFTER UI refresh
+        # Handle Popup outside the first try block but protected by _updating_timers
         if popup_needed_for:
-            info = popup_needed_for
-            t_type = info.get("type", "focus_manual")
-            
-            if t_type == "focus_pomo":
-                self.pomodoro_count += 1
+            try:
+                info = popup_needed_for
+                t_type = info.get("type", "focus_manual")
                 
-                # Record to persistent stats
-                # Pass Title as tag
-                self.data_manager.record_pomodoro(task_name=info['title'])
-                
-                # Refresh graph
-                if hasattr(self, 'contrib_panel'):
-                    self.contrib_panel.update()
-                
-                breaks_needed = 15 if (self.pomodoro_count % 4 == 0) else 5
-                break_name = "长休息" if breaks_needed == 15 else "短休息"
-                
-                msg = QMessageBox(self)
-                msg.setWindowTitle("番茄钟完成!")
-                msg.setText(f"恭喜！第 {self.pomodoro_count} 个番茄钟已完成。\n\n接下来建议进行 {breaks_needed} 分钟{break_name}。\n是否立即开始休息？")
-                msg.setIcon(QMessageBox.Information)
-                yes_btn = msg.addButton("开始休息", QMessageBox.YesRole)
-                no_btn = msg.addButton("稍后", QMessageBox.NoRole)
-                msg.exec()
-                
-                if msg.clickedButton() == yes_btn:
-                    self.start_focus_timer(breaks_needed, f"{break_name} ({breaks_needed}min)", task_type="break")
+                if t_type == "focus_pomo":
+                    is_test_mode = hasattr(self, 'check_test_mode') and self.check_test_mode.isChecked()
                     
-            elif t_type == "break":
-                msg = QMessageBox(self)
-                msg.setWindowTitle("休息结束!")
-                msg.setText("休息时间到了，神清气爽！\n是否开始下一个25分钟番茄钟？")
-                msg.setIcon(QMessageBox.Question)
-                yes_btn = msg.addButton("开始专注", QMessageBox.YesRole)
-                no_btn = msg.addButton("停止", QMessageBox.NoRole)
-                msg.exec()
-                
-                if msg.clickedButton() == yes_btn:
-                    self.start_focus_timer(25, "下一轮专注", task_type="focus_pomo")
+                    self.pomodoro_count += 1
+                    self.data_manager.record_pomodoro(task_name=info['title'], is_test_mode=is_test_mode)
                     
-            else:
-                # Manual task
-                msg = QMessageBox(self)
-                msg.setWindowTitle("专注完成!")
-                msg.setText(f"恭喜！任务 [{info['title']}] 已完成！\n请休息一下吧。")
-                msg.setIcon(QMessageBox.Information)
-                msg.setStandardButtons(QMessageBox.Ok)
-                msg.exec()
+                    if hasattr(self, 'contrib_panel'):
+                        self.contrib_panel.update()
+                    # Check for Test Mode removed from here as it is done above
+                    
+                    if is_test_mode:
+                        breaks_needed = 5/60
+                        break_name = "快速休息(测试)"
+                        display_time = "5 秒"
+                    else:
+                        breaks_needed = 15 if (self.pomodoro_count % 4 == 0) else 5
+                        break_name = "长休息" if breaks_needed == 15 else "短休息"
+                        display_time = f"{breaks_needed} 分钟"
+                    
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("番茄钟完成!")
+                    msg.setText(f"恭喜！第 {self.pomodoro_count} 个番茄钟已完成。\n\n接下来建议进行 {display_time} {break_name}。\n是否立即开始休息？")
+                    msg.setIcon(QMessageBox.Information)
+                    yes_btn = msg.addButton("开始休息", QMessageBox.YesRole)
+                    no_btn = msg.addButton("稍后", QMessageBox.NoRole)
+                    msg.exec()
+                    
+                    if msg.clickedButton() == yes_btn:
+                        task_disp_time = f"{int(breaks_needed*60)}秒" if is_test_mode else f"{breaks_needed}min"
+                        self.start_focus_timer(breaks_needed, f"{break_name} ({task_disp_time})", task_type="break")
+                        
+                elif t_type == "break":
+                    top_tags = [t[0] for t in self.data_manager.get_tag_stats()]
+                    
+                    is_test_mode = hasattr(self, 'check_test_mode') and self.check_test_mode.isChecked()
 
-                msg.setStandardButtons(QMessageBox.Ok)
-                msg.exec()
+                    dlg = RestCompletionDialog(self, history_items=top_tags)
+                    if dlg.exec():
+                        task_name = dlg.get_task_name()
+                        if not task_name:
+                             task_name = "下一轮专注"
+                        
+                        next_duration = 5/60 if is_test_mode else 25
+                        self.start_focus_timer(next_duration, task_name, task_type="focus_pomo")
+                        
+                else:
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("专注完成!")
+                    msg.setText(f"恭喜！任务 [{info['title']}] 已完成！\n请休息一下吧。")
+                    msg.setIcon(QMessageBox.Information)
+                    msg.setStandardButtons(QMessageBox.Ok)
+                    msg.exec()
+            except Exception as e:
+                print(f"Error in popup: {e}")
+            finally:
+                self._updating_timers = False
+        else:
+            self._updating_timers = False
 
     def toggle_mini_mode(self):
         """Switch between Normal and Mini Mode."""

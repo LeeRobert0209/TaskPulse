@@ -156,8 +156,11 @@ class DataManager:
         data["user_config"][key] = value
         self._save_json(data)
 
-    def record_pomodoro(self, task_name=None):
+    def record_pomodoro(self, task_name=None, is_test_mode=False):
         """Record a completed pomodoro for today."""
+        if is_test_mode:
+            return 0
+            
         # 1. Date Stats
         stats = self._load_stats()
         today = datetime.now().strftime("%Y-%m-%d")
