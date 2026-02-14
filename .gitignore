@@ -2,3 +2,4 @@ data/daily_records/
 
 # Config
 config.ini
+__pycache__
